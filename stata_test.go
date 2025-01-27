@@ -4,7 +4,83 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+	"unsafe"
+
+	"github.com/matryer/is"
 )
+
+// BytesToString converts byte slice to string without allocation
+func BytesToString(b []byte) string {
+	// Ignore if your IDE shows an error here; it's a false positive.
+	p := unsafe.SliceData(b)
+	return unsafe.String(p, len(b))
+}
+
+// StringToBytes converts string to byte slice without allocation
+func StringToBytes(s string) []byte {
+	p := unsafe.StringData(s)
+	b := unsafe.Slice(p, len(s))
+	return b
+}
+
+func TestRecordWrite(t *testing.T) {
+	is := is.New(t)
+	sf := NewFile()
+	sf.SetNumObs(int32(2))
+	sf.AddFieldMeta("bytefld", "byte field", StataByteId)
+	sf.AddFieldMeta("intfld", "int field", StataIntId)
+	sf.AddFieldMeta("str9fld", "str 9 field", 9)
+	sf.AddFieldMeta("doublefld", "double field", StataDoubleId)
+
+	is.NoErr(sf.BeginWrite(getTestingPath("empty_records.dta")))
+	is.NoErr(sf.EndWrite())
+	//TODO check stata output
+
+	var buf [9]byte
+	is.NoErr(sf.BeginWrite(getTestingPath("two_records.dta")))
+
+	sf.AppendByte(1)
+	sf.AppendInt(999)
+	copy(buf[:], "123456789")
+	sf.AppendStringN(buf[:], 9)
+	sf.AppendDouble(6.284)
+	is.NoErr(sf.RecordEnd())
+
+	sf.AppendByte(2)
+	sf.AppendInt(9999)
+	copy(buf[:], "1234567\x00") //must end string by \x00 if < field len
+	sf.AppendStringN(buf[:], 9)
+	sf.AppendDouble(3.142)
+	is.NoErr(sf.RecordEnd())
+	is.NoErr(sf.EndWrite())
+
+	dict, err := RunScript(testDir, `
+	qui {
+    use two_records.dta
+    count 
+    noi di "N="r(N)     
+    noi di "bytefld[1]=" bytefld[1]
+    noi di "str9fld[2]=" str9fld[2]
+    noi di "doublefld[2]=" doublefld[2]
+	}	
+	`)
+	if err!=nil {
+		t.Fatalf("error running stata script from TestRecordWrite: %s", err)
+	}
+
+	if value := dict["N"]; value != "2" {
+		t.Errorf("Expected N=2, found %s", value)
+	}
+	if value := dict["bytefld[1]"]; value != "1" {
+		t.Errorf("Expected bytefld[1]=1, found %s", value)
+	}
+	if value := dict["str9fld[2]"]; value != "1234567" {
+		t.Errorf("Expected str9fld[2]=1234567, found %s", value)
+	}
+	if value := dict["doublefld[2]"]; value != "3.142" {
+		t.Errorf("Expected doublefld[1]=3.142, found %s", value)
+	}
+}
 
 func TestFile_WriteTo(t *testing.T) {
 	sf := NewFile()

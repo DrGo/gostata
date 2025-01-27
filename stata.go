@@ -61,7 +61,6 @@ type (
 	Double = float64
 )
 
-// Supported Stata variable types
 const (
 	StataByteId   = 251 // 0xfb
 	StataIntId    = 252 // 0xfc
@@ -69,21 +68,6 @@ const (
 	StataFloatId  = 254 // 0xfe
 	StataDoubleId = 255 // 0xff
 )
-
-/*
-         type          code
-                --------------------
-                str1        1 = 0x01
-                str2        2 = 0x02
-                ...
-                str244    244 = 0xf4
-                byte      251 = 0xfb  (sic)
-                int       252 = 0xfc
-                long      253 = 0xfd
-                float     254 = 0xfe
-                double    255 = 0xff
-				--------------------
-*/
 
 // Field holds information on a Stata variable
 type Field struct {
@@ -150,6 +134,10 @@ func NewFile() *File {
 	return &sf
 }
 
+func (sf *File) SetNumObs(n int32) {
+	sf.NumObs = n 
+}
+
 // AddField adds a field to be written out to a Stata file
 // It does not verify similarly-named field does not exist
 // It does not verify field names and labels meet Stata requirements
@@ -202,14 +190,25 @@ func (sf *File) AddField(name, label string, slice interface{}) *Field {
 }
 
 // AddFieldMeta adds a description of a field in a record
+// argument typ uses one of the following Stata variable types
+//  		type          code
+//         --------------------
+//         str1        1 = 0x01
+//         str2        2 = 0x02
+//         ...
+//         str244    244 = 0xf4
+//         byte      251 = 0xfb  (sic)
+//         int       252 = 0xfc
+//         long      253 = 0xfd
+//         float     254 = 0xfe
+//         double    255 = 0xff
+//  	--------------------
 func (sf *File) AddFieldMeta(name, label string, typ byte) *Field {
-	var (
-		format = "%9.0g"
-	)
-
+	//TODO support custom formats
+	format := "%9.0g" //stata not c printf formats; this works for all numeric types
 	switch typ {
 	case StataByteId:
-		sf.recordSize++ 
+		sf.recordSize++
 	case StataIntId:
 		sf.recordSize += 2
 	case StataLongId:
@@ -219,7 +218,12 @@ func (sf *File) AddFieldMeta(name, label string, typ byte) *Field {
 	case StataDoubleId:
 		sf.recordSize += 8
 	default:
-		panic("unsupported data type in field " + name) //must be a programmer error, so panic
+		if typ < 1 && typ > 244 {
+			panic("unsupported data type " + string(typ) + " in field " + name) //must be a programmer error, so panic
+		}
+		// string
+		sf.recordSize += int(typ)
+		format = "%" + string(typ) + "s" //eg %15s
 	}
 	fld := &Field{
 		Name:      name,
@@ -331,6 +335,7 @@ func (sf *File) writeData(w io.Writer) error {
 
 // BeginWrite must be called once after defining all fields and before writing records
 // fileName will be created or truncated if it already exists
+// caveat: must set the number of observations before calling this method
 // it uses a 64kb buffer as recommended by Microsoft:
 // http://technet.microsoft.com/en-us/library/cc938632.aspx
 func (sf *File) BeginWrite(fileName string) error {
@@ -353,13 +358,18 @@ func (sf *File) BeginWrite(fileName string) error {
 }
 
 func (sf *File) EndWrite() error {
-	sf.w.Flush()
+	if err:=sf.w.Flush(); err!=nil {
+		return err
+	}
 	return sf.f.Close()
 }
 
 // RecordEnd must be called after writing all field data for the record
 func (sf *File) RecordEnd() error {
-	_, err := sf.w.Write(sf.recBuf)
+	n, err := sf.w.Write(sf.recBuf)
+	// if n != sf.recordSize {
+		fmt.Printf("error writing record, written=%d, recsize=%d\n", n, sf.recordSize)
+	// }
 	sf.offset = 0
 	return err
 }
@@ -390,6 +400,10 @@ func (sf *File) AppendDouble(v Double) {
 	sf.offset += 8
 }
 
+func (sf *File) AppendStringN(v []byte, n int ) {
+	copy(sf.recBuf[sf.offset:], v[:n])
+	sf.offset += n
+}
 // FIXME: do not overwrite an existing file
 // WriteFile
 func (sf *File) WriteFile(fileName string) error {
