@@ -2,6 +2,7 @@ package gostata
 
 import (
 	"math/rand"
+	"os"
 	"strings"
 	"testing"
 	"unsafe"
@@ -26,7 +27,7 @@ func StringToBytes(s string) []byte {
 func TestRecordWrite(t *testing.T) {
 	is := is.New(t)
 	sf := NewFile()
-	sf.SetNumObs(int32(2))
+	// sf.SetNumObs(int32(2))
 	sf.AddFieldMeta("bytefld", "byte field", StataByteId)
 	sf.AddFieldMeta("intfld", "int field", StataIntId)
 	sf.AddFieldMeta("str9fld", "str 9 field", 9)
@@ -64,7 +65,7 @@ func TestRecordWrite(t *testing.T) {
     noi di "doublefld[2]=" doublefld[2]
 	}	
 	`)
-	if err!=nil {
+	if err != nil {
 		t.Fatalf("error running stata script from TestRecordWrite: %s", err)
 	}
 
@@ -140,6 +141,43 @@ func TestFile_WriteToLarge(t *testing.T) {
 		t.Errorf("Expected mean(f64)=0, found %s", value)
 	}
 
+}
+
+type testStruct struct {
+	Name    string  `stata:"name:my_name,label:My Name,typ:str10"`
+	Age     int     `stata:"label:Age in Years,typ:int"`
+	Height  float64 `stata:"label:Height (meters),typ:double,format:%6.2f"`
+	IsValid bool    `stata:"typ:byte"` // Example of a boolean field
+}
+
+func TestWriteStataFromStruct(t *testing.T) {
+	is := is.New(t)
+	data := testStruct{}
+	sf, err := NewFileFromStruct(data)
+	is.NoErr(err)
+	fileName := getTestingPath("fromstruct.dta")
+	is.NoErr(sf.BeginWrite(fileName))
+	is.NoErr(sf.EndWrite())
+	// err = sf.BeginWrite(fileName)
+	// if err != nil {
+	//         t.Fatal(err)
+	// }
+	// err = sf.EndWrite()
+	// if err != nil {
+	//         t.Fatal(err)
+	// }
+	//
+	// Basic check: file should exist
+	if _, err := os.Stat(fileName); os.IsNotExist(err) {
+		t.Errorf("File %s not created", fileName)
+	}
+
+	// You would typically run Stata here and then verify the data
+	// For example, using a system call to Stata in your test:
+	// cmd := exec.Command("stata", "-b", "do", "verify_stata.do") // verify_stata.do would check the file
+	// if err := cmd.Run(); err != nil {
+	//  t.Errorf("Stata verification failed: %v", err)
+	// }
 }
 
 // The default number generator is deterministic, so it'll

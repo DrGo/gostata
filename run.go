@@ -30,6 +30,7 @@ func RunScript(workDir, script string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf(errmsg, err)
 	}
+	defer os.Remove(fname) // Clean up the temporary file
 	out, err := RunStataDo(workDir, fname)
 	if err != nil {
 		return nil, fmt.Errorf(errmsg, err)

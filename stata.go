@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"time"
 	"unsafe"
 )
 
@@ -52,7 +53,7 @@ type (
 	stataLabel   [stataLabelSize]byte
 )
 
-// Supported Stata var types aliased to Go types for maximum convertability
+// Supported Stata var types aliased to Go types for maximum convertibility
 type (
 	Byte   = int8
 	Int    = int16
@@ -68,15 +69,6 @@ const (
 	StataFloatId  = 254 // 0xfe
 	StataDoubleId = 255 // 0xff
 )
-
-// Field holds information on a Stata variable
-type Field struct {
-	Name      string
-	FieldType byte
-	Label     string
-	Format    string
-	data      interface{}
-}
 
 // field name must be exported for package Binary to see them
 type header struct {
@@ -101,8 +93,7 @@ func NewHeader() *header {
 	}
 	//FIXME: leave empty for production; comment the line below
 	copy(fh.DataLabel[:], "Written by VDEC Stata File Creator")
-	//FIXME: ? add timestamp
-	// fh.timeStamp[0] = 0
+	copy(fh.TimeStamp[:], time.Now().Format("02 Jan 2006 15:04"))
 	return &fh
 }
 
@@ -134,8 +125,36 @@ func NewFile() *File {
 	return &sf
 }
 
-func (sf *File) SetNumObs(n int32) {
-	sf.NumObs = n 
+func NewFileFromStruct(data interface{}) (*File, error) {
+        fields, err := ExtractFields(data)
+        if err != nil {
+                return nil, err
+        }
+
+        sf := &File{
+                header: NewHeader(),
+                fields: fields,
+        }
+
+        for _, f := range sf.fields {
+                switch f.FieldType {
+                case StataByteId:
+                        sf.recordSize++
+                case StataIntId:
+                        sf.recordSize += 2
+                case StataLongId:
+                        sf.recordSize += 4
+                case StataFloatId:
+                        sf.recordSize += 4
+                case StataDoubleId:
+                        sf.recordSize += 8
+                default: // String type
+                        // sf.strings = append(sf.strings, convertInterfaceToStringSlice(f.data)...)
+                        sf.recordSize += int(f.FieldType)
+                }
+        }
+
+        return sf, nil
 }
 
 // AddField adds a field to be written out to a Stata file
@@ -182,7 +201,7 @@ func (sf *File) AddField(name, label string, slice interface{}) *Field {
 		data:      slice,
 	}
 	sf.fields = append(sf.fields, fld)
-	sf.NumVars = int16(len(sf.fields))
+	sf.NumVars++
 	if sliceLen > int(sf.NumObs) {
 		sf.NumObs = int32(sliceLen)
 	}
@@ -191,18 +210,19 @@ func (sf *File) AddField(name, label string, slice interface{}) *Field {
 
 // AddFieldMeta adds a description of a field in a record
 // argument typ uses one of the following Stata variable types
-//  		type          code
-//         --------------------
-//         str1        1 = 0x01
-//         str2        2 = 0x02
-//         ...
-//         str244    244 = 0xf4
-//         byte      251 = 0xfb  (sic)
-//         int       252 = 0xfc
-//         long      253 = 0xfd
-//         float     254 = 0xfe
-//         double    255 = 0xff
-//  	--------------------
+//
+//			type          code
+//	       --------------------
+//	       str1        1 = 0x01
+//	       str2        2 = 0x02
+//	       ...
+//	       str244    244 = 0xf4
+//	       byte      251 = 0xfb  (sic)
+//	       int       252 = 0xfc
+//	       long      253 = 0xfd
+//	       float     254 = 0xfe
+//	       double    255 = 0xff
+//		--------------------
 func (sf *File) AddFieldMeta(name, label string, typ byte) *Field {
 	//TODO support custom formats
 	format := "%9.0g" //stata not c printf formats; this works for all numeric types
@@ -232,7 +252,7 @@ func (sf *File) AddFieldMeta(name, label string, typ byte) *Field {
 		Format:    format,
 	}
 	sf.fields = append(sf.fields, fld)
-	sf.NumVars = int16(len(sf.fields))
+	sf.NumVars++ 
 	return fld
 }
 
@@ -243,6 +263,7 @@ func (sf *File) WriteTo(w io.Writer) (int64, error) {
 }
 
 func (sf *File) writeHeader(w io.Writer) error {
+	// setting the header fields
 	sf.NumVars = int16(len(sf.fields))
 	return binary.Write(w, littleEndian, *sf.header)
 }
@@ -358,7 +379,17 @@ func (sf *File) BeginWrite(fileName string) error {
 }
 
 func (sf *File) EndWrite() error {
-	if err:=sf.w.Flush(); err!=nil {
+	if err := sf.w.Flush(); err != nil {
+		return err
+	}
+	// Rewind and write the header with the correct NumObs
+	if _, err := sf.f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if err := sf.writeHeader(sf.w); err != nil {
+		return err
+	}
+	if err := sf.w.Flush(); err != nil {
 		return err
 	}
 	return sf.f.Close()
@@ -366,11 +397,12 @@ func (sf *File) EndWrite() error {
 
 // RecordEnd must be called after writing all field data for the record
 func (sf *File) RecordEnd() error {
-	n, err := sf.w.Write(sf.recBuf)
+	_, err := sf.w.Write(sf.recBuf)
 	// if n != sf.recordSize {
-		fmt.Printf("error writing record, written=%d, recsize=%d\n", n, sf.recordSize)
+	// fmt.Printf("error writing record, written=%d, recsize=%d\n", n, sf.recordSize)
 	// }
 	sf.offset = 0
+	sf.NumObs++
 	return err
 }
 
@@ -400,10 +432,11 @@ func (sf *File) AppendDouble(v Double) {
 	sf.offset += 8
 }
 
-func (sf *File) AppendStringN(v []byte, n int ) {
+func (sf *File) AppendStringN(v []byte, n int) {
 	copy(sf.recBuf[sf.offset:], v[:n])
 	sf.offset += n
 }
+
 // FIXME: do not overwrite an existing file
 // WriteFile
 func (sf *File) WriteFile(fileName string) error {
