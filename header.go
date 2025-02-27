@@ -72,7 +72,7 @@ func goTypeToStataType(t reflect.Type) (string, error) {
 		return "byte", nil
 	case reflect.Int16:
 		return "int", nil
-	case reflect.Int32:
+	case reflect.Int32, reflect.Int64:
 		return "long", nil
 	case reflect.Float32:
 		return "float", nil
@@ -102,9 +102,9 @@ func ExtractFields(v interface{}) ([]*Field, error) {
 	for i := 0; i < rt.NumField(); i++ {
 		sf := rt.Field(i)
 		tagStr := sf.Tag.Get("stata")
-		if tagStr == "" {
-			continue
-		}
+		// if tagStr == "" {
+		// 	continue
+		// }
 		tagMap := parseStataTag(tagStr)
 
 		name := tagMap["name"]
@@ -135,19 +135,38 @@ func ExtractFields(v interface{}) ([]*Field, error) {
 
 		format := tagMap["format"]
 
-		dataVal := rv.Field(i).Interface()
-
 		fields = append(fields, &Field{
 			Name:      name,
 			FieldType: fieldType,
 			Label:     label,
 			Format:    format,
-			data:      dataVal,
+			data:   rv.Field(i).Interface(),
 		})
 	}
 
 	if len(fields) == 0 {
-		return nil, errors.New("ExtractFields: no fields with 'stata' tag found")
+		return nil, errors.New("ExtractFields: no fields found")
 	}
 	return fields, nil
+}
+
+func calcRecordSize(fields []*Field) int {
+        recordSize := 0
+        for _, f := range fields {
+                switch f.FieldType {
+                case StataByteId:
+                        recordSize++
+                case StataIntId:
+                        recordSize += 2
+                case StataLongId:
+                        recordSize += 4
+                case StataFloatId:
+                        recordSize += 4
+                case StataDoubleId:
+                        recordSize += 8
+                default: // String type
+                        recordSize += int(f.FieldType)
+                }
+        }
+        return recordSize
 }

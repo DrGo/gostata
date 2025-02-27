@@ -126,35 +126,18 @@ func NewFile() *File {
 }
 
 func NewFileFromStruct(data interface{}) (*File, error) {
-        fields, err := ExtractFields(data)
-        if err != nil {
-                return nil, err
-        }
+	fields, err := ExtractFields(data)
+	if err != nil {
+		return nil, err
+	}
 
-        sf := &File{
-                header: NewHeader(),
-                fields: fields,
-        }
+	sf := &File{
+		header: NewHeader(),
+		fields: fields,
+	}
+	sf.recordSize = calcRecordSize(sf.fields)
 
-        for _, f := range sf.fields {
-                switch f.FieldType {
-                case StataByteId:
-                        sf.recordSize++
-                case StataIntId:
-                        sf.recordSize += 2
-                case StataLongId:
-                        sf.recordSize += 4
-                case StataFloatId:
-                        sf.recordSize += 4
-                case StataDoubleId:
-                        sf.recordSize += 8
-                default: // String type
-                        // sf.strings = append(sf.strings, convertInterfaceToStringSlice(f.data)...)
-                        sf.recordSize += int(f.FieldType)
-                }
-        }
-
-        return sf, nil
+	return sf, nil
 }
 
 // AddField adds a field to be written out to a Stata file
@@ -252,7 +235,7 @@ func (sf *File) AddFieldMeta(name, label string, typ byte) *Field {
 		Format:    format,
 	}
 	sf.fields = append(sf.fields, fld)
-	sf.NumVars++ 
+	sf.NumVars++
 	return fld
 }
 
@@ -432,7 +415,13 @@ func (sf *File) AppendDouble(v Double) {
 	sf.offset += 8
 }
 
-func (sf *File) AppendStringN(v []byte, n int) {
+func (sf *File) AppendStringN(v string, n int) {
+    b := []byte(v)
+    copy(sf.recBuf[sf.offset:], b[:])
+    sf.offset += n
+}
+
+func (sf *File) AppendBytesN(v []byte, n int) {
 	copy(sf.recBuf[sf.offset:], v[:n])
 	sf.offset += n
 }

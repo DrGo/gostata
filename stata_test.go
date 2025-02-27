@@ -37,20 +37,19 @@ func TestRecordWrite(t *testing.T) {
 	is.NoErr(sf.EndWrite())
 	//TODO check stata output
 
-	var buf [9]byte
+	// var buf [9]byte
 	is.NoErr(sf.BeginWrite(getTestingPath("two_records.dta")))
 
 	sf.AppendByte(1)
 	sf.AppendInt(999)
-	copy(buf[:], "123456789")
-	sf.AppendStringN(buf[:], 9)
+	sf.AppendStringN( "123456789", 9)
 	sf.AppendDouble(6.284)
 	is.NoErr(sf.RecordEnd())
 
 	sf.AppendByte(2)
 	sf.AppendInt(9999)
-	copy(buf[:], "1234567\x00") //must end string by \x00 if < field len
-	sf.AppendStringN(buf[:], 9)
+	// copy(buf[:], "1234567\x00") //must end string by \x00 if < field len
+	sf.AppendStringN("1234567\x00", 9)
 	sf.AppendDouble(3.142)
 	is.NoErr(sf.RecordEnd())
 	is.NoErr(sf.EndWrite())
